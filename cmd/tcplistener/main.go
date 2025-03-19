@@ -25,7 +25,8 @@ func main() {
         log.Printf("Connection accepted")
         
         lines := getLinesChannel(conn)
-        for line := range lines {
+        
+		for line := range lines {
             fmt.Println(line)
         }
         
