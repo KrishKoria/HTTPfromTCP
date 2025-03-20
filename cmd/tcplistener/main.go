@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/KrishKoria/HTTPfromTCP/internal/request"
 )
 
 func main() {
@@ -24,57 +24,17 @@ func main() {
         
         log.Printf("Connection accepted")
         
-        lines := getLinesChannel(conn)
-        
-		for line := range lines {
-            fmt.Println(line)
+        res, err := request.RequestFromReader(conn)
+        if err != nil {
+            log.Printf("Error reading request: %v", err)
+            continue
         }
         
+		fmt.Println("Request line:")
+        fmt.Printf("- Method: %s\n", res.RequestLine.Method)
+        fmt.Printf("- Target: %s\n", res.RequestLine.RequestTarget)
+        fmt.Printf("- Version: %s\n", res.RequestLine.HttpVersion[5:])
+        conn.Close()
         log.Printf("Connection closed")
     }
-}
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-    lines := make(chan string)
-    go func() {
-        defer f.Close()
-        
-        buffer := make([]byte, 8)
-        currentLine := ""
-        
-        for {
-            bytesRead, err := f.Read(buffer)
-            if err == io.EOF {
-                break
-            }
-            if err != nil {
-                log.Fatal(err)
-            }
-            
-            data := string(buffer[:bytesRead])
-            parts := strings.Split(data, "\n")
-            
-            for i := 0; i < len(parts); i++ {
-                if i < len(parts)-1 {
-                    currentLine += parts[i]
-                    lines <- currentLine
-                    currentLine = ""
-                } else if strings.HasSuffix(data, "\n") {
-                    currentLine += parts[i]
-                    lines <- currentLine
-                    currentLine = ""
-                } else {
-                    currentLine += parts[i]
-                }
-            }
-        }
-        
-        if currentLine != "" {
-            lines <- currentLine
-        }
-        
-        close(lines)
-    }()
-    
-    return lines
 }
