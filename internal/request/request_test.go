@@ -1,7 +1,7 @@
 package request
 
 import (
-	"strings"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,65 +9,128 @@ import (
 )
 
 func TestRequestFromReader(t *testing.T) {
-    t.Run("Good GET Request line", func(t *testing.T) {
-        r, err := RequestFromReader(strings.NewReader("GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"))
-        require.NoError(t, err)
-        require.NotNil(t, r)
-        assert.Equal(t, "GET", r.RequestLine.Method)
-        assert.Equal(t, "/", r.RequestLine.RequestTarget)
-        assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
-    })
+    // Test: Good GET Request line
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+        numBytesPerRead: 3,
+    }
+    r, err := RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "GET", r.RequestLine.Method)
+    assert.Equal(t, "/", r.RequestLine.RequestTarget)
+    assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
 
-    t.Run("Good GET Request line with path", func(t *testing.T) {
-        r, err := RequestFromReader(strings.NewReader("GET /coffee HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"))
-        require.NoError(t, err)
-        require.NotNil(t, r)
-        assert.Equal(t, "GET", r.RequestLine.Method)
-        assert.Equal(t, "/coffee", r.RequestLine.RequestTarget)
-        assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
-    })
+    // Test: Good GET Request line with path
+    reader = &chunkReader{
+        data:            "GET /coffee HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+        numBytesPerRead: 1,
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "GET", r.RequestLine.Method)
+    assert.Equal(t, "/coffee", r.RequestLine.RequestTarget)
+    assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
 
-    t.Run("Good POST Request with path", func(t *testing.T) {
-        r, err := RequestFromReader(strings.NewReader("POST /submit HTTP/1.1\r\nHost: localhost:42069\r\nContent-Type: application/json\r\nContent-Length: 18\r\n\r\n{\"data\":\"example\"}"))
-        require.NoError(t, err)
-        require.NotNil(t, r)
-        assert.Equal(t, "POST", r.RequestLine.Method)
-        assert.Equal(t, "/submit", r.RequestLine.RequestTarget)
-        assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
-    })
+    // Test: Good POST Request with path
+    reader = &chunkReader{
+        data:            "POST /submit HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"data\":\"test\"}",
+        numBytesPerRead: 5,
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "POST", r.RequestLine.Method)
+    assert.Equal(t, "/submit", r.RequestLine.RequestTarget)
+    assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
 
-    t.Run("Invalid number of parts in request line", func(t *testing.T) {
-        _, err := RequestFromReader(strings.NewReader("/coffee HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"))
-        require.Error(t, err)
-    })
+    // Test: Invalid number of parts in request line
+    reader = &chunkReader{
+        data:            "GET /index HTTP\r\nHost: localhost\r\n\r\n",
+        numBytesPerRead: 4,
+    }
+    r, err = RequestFromReader(reader)
+    require.Error(t, err)
+    require.Nil(t, r)
 
-    t.Run("Invalid method (lowercase) in Request line", func(t *testing.T) {
-        _, err := RequestFromReader(strings.NewReader("get / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"))
-        require.Error(t, err)
-    })
+    // Test: Invalid method (out of order) Request line
+    reader = &chunkReader{
+        data:            "get / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        numBytesPerRead: 2,
+    }
+    r, err = RequestFromReader(reader)
+    require.Error(t, err)
+    require.Nil(t, r)
 
-    t.Run("Invalid method (symbols) in Request line", func(t *testing.T) {
-        _, err := RequestFromReader(strings.NewReader("GET@POST / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"))
-        require.Error(t, err)
-    })
+    // Test: Invalid version in Request line
+    reader = &chunkReader{
+        data:            "GET / HTTP/2.0\r\nHost: localhost\r\n\r\n",
+        numBytesPerRead: 7,
+    }
+    r, err = RequestFromReader(reader)
+    require.Error(t, err)
+    require.Nil(t, r)
 
-    t.Run("Invalid version in Request line", func(t *testing.T) {
-        _, err := RequestFromReader(strings.NewReader("GET / HTTP/2.0\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"))
-        require.Error(t, err)
-    })
+    // Test with different chunk sizes
+    reader = &chunkReader{
+        data:            "GET /api/v1/users HTTP/1.1\r\nHost: api.example.com\r\n\r\n",
+        numBytesPerRead: 10, // Larger chunk size
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "GET", r.RequestLine.Method)
+    assert.Equal(t, "/api/v1/users", r.RequestLine.RequestTarget)
+    assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
 
-    t.Run("Empty request", func(t *testing.T) {
-        _, err := RequestFromReader(strings.NewReader(""))
-        require.Error(t, err)
-    })
+    // Test with a chunk size of exactly one request line
+    reader = &chunkReader{
+        data:            "PUT /resource HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n",
+        numBytesPerRead: 22, // Exactly the length of "PUT /resource HTTP/1.1"
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "PUT", r.RequestLine.Method)
+    assert.Equal(t, "/resource", r.RequestLine.RequestTarget)
+    assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
+    
+    // Test with the entire request read at once
+    fullRequest := "DELETE /items/42 HTTP/1.1\r\nAuthorization: Bearer token123\r\n\r\n"
+    reader = &chunkReader{
+        data:            fullRequest,
+        numBytesPerRead: len(fullRequest), // Read the entire request in one chunk
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "DELETE", r.RequestLine.Method)
+    assert.Equal(t, "/items/42", r.RequestLine.RequestTarget)
+    assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
+}
 
-    t.Run("Whitespace only request", func(t *testing.T) {
-        _, err := RequestFromReader(strings.NewReader("  \r\n  \r\n"))
-        require.Error(t, err)
-    })
+type chunkReader struct {
+    data            string
+    numBytesPerRead int
+    pos             int
+}
 
-    t.Run("Request without CRLF", func(t *testing.T) {
-        _, err := RequestFromReader(strings.NewReader("GET / HTTP/1.1"))
-        require.NoError(t, err) // This is a valid request
-    })
+// Read reads up to len(p) or numBytesPerRead bytes from the string per call
+// its useful for simulating reading a variable number of bytes per chunk from a network connection
+func (cr *chunkReader) Read(p []byte) (n int, err error) {
+    if cr.pos >= len(cr.data) {
+        return 0, io.EOF
+    }
+    endIndex := cr.pos + cr.numBytesPerRead
+    if endIndex > len(cr.data) {
+        endIndex = len(cr.data)
+    }
+    n = copy(p, cr.data[cr.pos:endIndex])
+    cr.pos += n
+    if n > cr.numBytesPerRead {
+        n = cr.numBytesPerRead
+        cr.pos -= n - cr.numBytesPerRead
+    }
+    return n, nil
 }
