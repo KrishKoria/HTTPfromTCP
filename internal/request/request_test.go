@@ -110,6 +110,81 @@ func TestRequestFromReader(t *testing.T) {
     assert.Equal(t, "HTTP/1.1", r.RequestLine.HttpVersion)
 }
 
+func TestRequestHeader(t *testing.T) {
+    // Test: Standard Headers
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+        numBytesPerRead: 3,
+    }
+    r, err := RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "localhost:42069", r.Headers["host"])
+    assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+    assert.Equal(t, "*/*", r.Headers["accept"])
+    
+    // Test: Malformed Header
+    reader = &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost localhost:42069\r\n\r\n",
+        numBytesPerRead: 3,
+    }
+    _, err = RequestFromReader(reader)
+    require.Error(t, err)
+    
+    // Test: Empty Headers
+    reader = &chunkReader{
+        data:            "GET / HTTP/1.1\r\n\r\n",
+        numBytesPerRead: 5,
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, 0, len(r.Headers))
+    
+    // Test: Duplicate Headers
+    reader = &chunkReader{
+        data:            "GET / HTTP/1.1\r\nAccept: text/html\r\nAccept: application/json\r\n\r\n",
+        numBytesPerRead: 4,
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "text/html,application/json", r.Headers["accept"])
+    
+    // Test: Case Insensitive Headers
+    reader = &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost: example.com\r\nHOST: example2.com\r\n\r\n",
+        numBytesPerRead: 6,
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    // Headers should be case-insensitive, so the latter one overwrites or gets concatenated
+    assert.Contains(t, r.Headers, "host")
+    assert.True(t, r.Headers["host"] == "example.com,example2.com" || r.Headers["host"] == "example2.com")
+    
+    // Test: Missing End of Headers (should eventually timeout/error in real-world)
+    // Here we're using a reader that will simulate complete data with EOF
+    reader = &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost: example.com\r\n",
+        numBytesPerRead: 8,
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err) // Should be OK since EOF is treated as end
+    require.NotNil(t, r)
+    assert.Equal(t, "example.com", r.Headers["host"])
+    
+    // Test: Header with whitespace
+    reader = &chunkReader{
+        data:            "GET / HTTP/1.1\r\nContent-Type: application/json; charset=utf-8\r\n\r\n",
+        numBytesPerRead: 7,
+    }
+    r, err = RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "application/json; charset=utf-8", r.Headers["content-type"])
+}
+
 type chunkReader struct {
     data            string
     numBytesPerRead int

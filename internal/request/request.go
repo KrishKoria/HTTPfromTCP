@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/KrishKoria/HTTPfromTCP/internal/headers"
 )
 
 type Request struct {
 	RequestLine RequestLine
 	state RequestState
+	Headers headers.Headers
 }
 
 type RequestLine struct {
@@ -24,6 +27,7 @@ type RequestState int
 const (
 	requestStateInitialized RequestState = iota
 	requestStateDone
+	requestStateParsingHeaders
 )
 const bufferSize = 8
 
@@ -32,6 +36,7 @@ func RequestFromReader(reader io.Reader) (*Request, error){
 	readToIndex := 0
 	req := &Request{
 		state: requestStateInitialized,
+		Headers: headers.NewHeaders(),
 	}
 	for req.state != requestStateDone {
 		if(readToIndex >= len(buf)){
@@ -60,6 +65,25 @@ func RequestFromReader(reader io.Reader) (*Request, error){
 }
 
 func(r *Request) parse(data []byte) (int, error){
+	totalBytesParsed := 0
+    
+    for r.state != requestStateDone {
+        bytesUsed, err := r.parseSingle(data[totalBytesParsed:])
+        if err != nil {
+            return 0, err
+        }
+        if bytesUsed == 0 {
+            break
+        }
+        totalBytesParsed += bytesUsed
+        if totalBytesParsed >= len(data) {
+            break
+        }
+    }
+    
+    return totalBytesParsed, nil
+}
+func(r *Request) parseSingle(data []byte) (int, error){
 	switch r.state {
 	case requestStateInitialized:
 		requestLine, bytesUsed, err := parseRequestLine(data)
@@ -70,8 +94,20 @@ func(r *Request) parse(data []byte) (int, error){
 			return 0, nil
 		}
 		r.RequestLine = *requestLine
-		r.state = requestStateDone
+		r.state = requestStateParsingHeaders
 		return bytesUsed, nil
+	case requestStateParsingHeaders:
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			return 0, nil
+		}
+		if done {
+			r.state = requestStateDone
+		}
+		return n, nil
 	case requestStateDone:
 		return 0, fmt.Errorf("request is already done")
 	default:
