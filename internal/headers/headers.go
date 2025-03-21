@@ -1,4 +1,4 @@
-package header
+package headers
 
 import (
 	"bytes"
@@ -20,8 +20,6 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 0, false, nil
 	}
 	if idx == 0 {
-		// the empty line
-		// headers are done, consume the CRLF
 		return 2, true, nil
 	}
 
@@ -31,11 +29,22 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	if key != strings.TrimRight(key, " ") {
 		return 0, false, fmt.Errorf("invalid header name: %s", key)
 	}
-
+	
 	value := bytes.TrimSpace(parts[1])
 	key = strings.TrimSpace(key)
+	for _, r := range key {
+        if !((r >= 'A' && r <= 'Z') || 
+            (r >= 'a' && r <= 'z') || 
+            (r >= '0' && r <= '9') || 
+            r == '!' || r == '#' || r == '$' || r == '%' || r == '&' || 
+            r == '\'' || r == '*' || r == '+' || r == '-' || r == '.' || 
+            r == '^' || r == '_' || r == '`' || r == '|' || r == '~') {
+            return 0, false, fmt.Errorf("invalid character in header name: %s", key)
+        }
+    }
 
-	h.Set(key, string(value))
+
+	h.Set(strings.ToLower(key), string(value))
 	return idx + 2, false, nil
 }
 
