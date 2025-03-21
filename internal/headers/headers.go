@@ -24,7 +24,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	}
 
 	parts := bytes.SplitN(data[:idx], []byte(":"), 2)
-	key := string(parts[0])
+	key := strings.ToLower(string(parts[0]))
 
 	if key != strings.TrimRight(key, " ") {
 		return 0, false, fmt.Errorf("invalid header name: %s", key)
@@ -43,8 +43,13 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
         }
     }
 
+	if existing, ok := h[key]; ok {
+		value = []byte(existing + "," + string(value))
+		h.Set(key, string(value))
+	} else {
+		h.Set(key, string(value))
+	}
 
-	h.Set(strings.ToLower(key), string(value))
 	return idx + 2, false, nil
 }
 
