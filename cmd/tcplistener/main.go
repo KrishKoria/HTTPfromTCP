@@ -38,6 +38,8 @@ func main() {
         for key, value := range res.Headers {
             fmt.Printf("- %s: %s\n", key, value)
         }
+        fmt.Println("Body:")
+        fmt.Println(string(res.Body))
 
         conn.Close()
         log.Printf("Connection closed")
