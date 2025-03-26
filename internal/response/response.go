@@ -98,3 +98,44 @@ func (w *Writer) WriteBody(p []byte) (int, error) {
     w.state = writerStateBodyWritten
     return n, nil
 }
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+    if w.state != writerStateHeadersWritten && w.state != writerStateBodyWritten {
+        return 0, fmt.Errorf("chunks must be written after headers (current state: %d)", w.state)
+    }
+    
+    if len(p) == 0 {
+        return 0, nil
+    }
+    
+    _, err := fmt.Fprintf(w.w, "%x\r\n", len(p))
+    if err != nil {
+        return 0, err
+    }
+    
+    n, err := w.w.Write(p)
+    if err != nil {
+        return n, err
+    }
+    
+    _, err = w.w.Write([]byte("\r\n"))
+    if err != nil {
+        return n, err
+    }
+    
+    w.state = writerStateBodyWritten
+    return n, nil
+}
+
+func (w *Writer) WriteChunkedBodyDone() error {
+    if w.state != writerStateBodyWritten {
+        return fmt.Errorf("can't finalize chunks before writing any (current state: %d)", w.state)
+    }
+    
+    _, err := w.w.Write([]byte("0\r\n\r\n"))
+    if err != nil {
+        return err
+    }
+    
+    return nil
+}
