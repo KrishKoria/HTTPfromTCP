@@ -15,12 +15,15 @@ func NewHeaders() Headers {
 }
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
+	// print the data with crlf encoding
 
 	idx := bytes.Index(data, []byte(crlf))
 	if idx == -1 {
 		return 0, false, nil
 	}
 	if idx == 0 {
+		// the empty line
+		// headers are done, consume the CRLF
 		return 2, true, nil
 	}
 
@@ -63,8 +66,15 @@ func (h Headers) Override(key, value string) {
 	h[key] = value
 }
 
+func (h Headers) Remove(key string) {
+	key = strings.ToLower(key)
+	delete(h, key)
+}
+
 var tokenChars = []byte{'!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~'}
 
+// validTokens checks if the data contains only valid tokens
+// or characters that are allowed in a token
 func validTokens(data []byte) bool {
 	for _, c := range data {
 		if !(c >= 'A' && c <= 'Z' ||

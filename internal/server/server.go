@@ -1,55 +1,18 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync/atomic"
 
-	"github.com/KrishKoria/HTTPfromTCP/internal/headers"
 	"github.com/KrishKoria/HTTPfromTCP/internal/request"
 	"github.com/KrishKoria/HTTPfromTCP/internal/response"
 )
 
-type Handler func(w io.Writer, req *request.Request) *HandlerError
+type Handler func(w *response.Writer, req *request.Request)
 
-type HandlerError struct {
-    StatusCode response.StatusCode
-    Message    string
-    Headers    headers.Headers
-}
-
-func (he HandlerError) Write(w io.Writer) {
-    writer := response.NewWriter(w)
-    messageBytes := []byte(he.Message)
-    
-    h := response.GetDefaultHeaders(len(messageBytes))
-    if he.Headers != nil {
-        for k, v := range he.Headers {
-            h.Override(k, v)
-        }
-    }
-    
-    err := writer.WriteStatusLine(he.StatusCode)
-    if err != nil {
-        log.Printf("Error writing status line: %v", err)
-        return
-    }
-    
-    err = writer.WriteHeaders(h)
-    if err != nil {
-        log.Printf("Error writing headers: %v", err)
-        return
-    }
-    
-    _, err = writer.WriteBody(messageBytes)
-    if err != nil {
-        log.Printf("Error writing body: %v", err)
-    }
-}
-
+// Server is an HTTP 1.1 server
 type Server struct {
 	handler  Handler
 	listener net.Listener
@@ -92,45 +55,16 @@ func (s *Server) listen() {
 }
 
 func (s *Server) handle(conn net.Conn) {
-    defer conn.Close()
-    req, err := request.RequestFromReader(conn)
-    if err != nil {
-        hErr := &HandlerError{
-            StatusCode: response.StatusBadRequest,
-            Message:    err.Error(),
-        }
-        hErr.Write(conn)
-        return
-    }
-    
-    buf := bytes.NewBuffer([]byte{})
-    hErr := s.handler(buf, req)
-    if hErr != nil {
-        hErr.Write(conn)
-        return
-    }
-    
-    b := buf.Bytes()
-    writer := response.NewWriter(conn)
-    
-    headers := response.GetDefaultHeaders(len(b))
-    headers.Override("Content-Type", "text/html")
-    
-    err = writer.WriteStatusLine(response.StatusOK)
-    if err != nil {
-        log.Printf("Error writing status line: %v", err)
-        return
-    }
-    
-    err = writer.WriteHeaders(headers)
-    if err != nil {
-        log.Printf("Error writing headers: %v", err)
-        return
-    }
-    
-    _, err = writer.WriteBody(b)
-    if err != nil {
-        log.Printf("Error writing body: %v", err)
-        return
-    }
+	defer conn.Close()
+	w := response.NewWriter(conn)
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		w.WriteStatusLine(response.StatusCodeBadRequest)
+		body := []byte(fmt.Sprintf("Error parsing request: %v", err))
+		w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+		w.WriteBody(body)
+		return
+	}
+	s.handler(w, req)
+	return
 }
